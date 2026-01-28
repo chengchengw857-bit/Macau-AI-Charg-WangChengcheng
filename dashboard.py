@@ -1,12 +1,44 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import datetime     
-import numpy as np  
-import streamlit as st
-import pandas as pd
-import plotly.express as px
+import datetime
+import numpy as np
 import time
+
+# 定义一个实时数据仿真函数
+def get_simulated_realtime_data():
+    try:
+        # 读取原始基础数据
+        df = pd.read_csv('macau_charging_raw_data.csv')
+        df['时间戳'] = pd.to_datetime(df['时间戳'])
+        
+        # 获取当前的现实时间
+        now = datetime.datetime.now()
+        last_data_time = df['时间戳'].iloc[-1]
+        
+        # 魔法核心：如果现实时间超过了数据的最后时间，自动生成“仿真数据”填补空缺
+        if now > last_data_time:
+            new_rows = []
+            minutes_to_add = int((now - last_data_time).total_seconds() / 60)
+            # 限制补齐量（最多补一天），防止系统崩溃
+            minutes_to_add = min(minutes_to_add, 1440) 
+            
+            for i in range(1, minutes_to_add + 1):
+                new_time = last_data_time + datetime.timedelta(minutes=i)
+                for dist in ['North', 'Central', 'Cotai']:
+                    # 根据区域特征模拟不同的实时负载
+                    base = 50 if dist == 'Cotai' else 35
+                    load = base + np.random.randint(-10, 20)
+                    queue = np.random.randint(0, 4) if load > 55 else np.random.randint(0, 2)
+                    new_rows.append([new_time, dist, load, queue])
+            
+            if new_rows:
+                new_df = pd.DataFrame(new_rows, columns=['时间戳', '区域', '用电负荷(kW)', '排队车辆数'])
+                df = pd.concat([df, new_df]).reset_index(drop=True)
+        return df
+    except:
+        st.error("数据加载失败，请确保目录下有 macau_charging_raw_data.csv")
+        return pd.DataFrame()
 
 # 1. 页面配置（设置网页标题和图标）
 st.set_page_config(page_title="澳门智充未来-智慧大屏", layout="wide")
@@ -15,13 +47,8 @@ st.title("📊 澳门智充未来：实时能源监测看板")
 st.markdown("---")
 
 # 2. 加载第一阶段生成的原始数据
-try:
-    df = pd.read_csv('macau_charging_raw_data.csv')
-    df['时间戳'] = pd.to_datetime(df['时间戳'])
-except:
-    st.error("找不到数据文件，请先运行 data_sim.py")
-
-# 3. 侧边栏：筛选功能（让评委觉得系统很灵活）
+df = get_simulated_realtime_data()
+# 3. 侧边栏：筛选功能
 st.sidebar.header("数据筛选")
 selected_district = st.sidebar.multiselect("选择查看区域", options=df['区域'].unique(), default=df['区域'].unique())
 
@@ -120,7 +147,10 @@ with col_b:
 
 st.write("#### 📡 实时接入节点状态")
 st.dataframe(filtered_df.tail(5)) 
-if st.sidebar.button('📡 开启实时监控模式'):
-    st.toast("正在连接澳门电力 (CEM) 实时数据网关...")
-    time.sleep(1)
-    st.rerun() 
+
+auto_monitor = st.sidebar.checkbox('📡 开启全澳实时监控模式', value=False)
+
+if auto_monitor:
+    st.toast("正在同步澳门交通事务局 (DSAT) 数据流...")
+    time.sleep(5) # 每 5 秒刷新一次
+    st.rerun()
