@@ -68,7 +68,7 @@ def get_advanced_data():
 df, current_time = get_advanced_data()
 
 # --- 界面展示 ---
-st.title("🔋 澳门智充未来：AI 驱动的补能能源中枢")
+st.title("🔋澳门智充未来：实时监控与调度中心")
 st.caption(f"🚀 系统运行等级: **Industrial Grade AI** | 北京时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # 第一部分：全栈核心指标看板
