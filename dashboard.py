@@ -5,152 +5,115 @@ import datetime
 import numpy as np
 import time
 
-# 定义一个实时数据仿真函数
-def get_simulated_realtime_data():
+# 1. 页面基础配置：设置为宽屏模式，增加科技感标题
+st.set_page_config(page_title="澳门智充未来-实时监控中心", layout="wide", initial_sidebar_state="collapsed")
+
+# --- 核心逻辑：北京时间数据同步与仿真引擎 ---
+def get_live_data():
     try:
-        # 读取原始基础数据
+        # 获取当前北京时间 (针对云服务器UTC时间进行+8处理)
+        beijing_now = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
+        
+        # 读取地基数据
         df = pd.read_csv('macau_charging_raw_data.csv')
         df['时间戳'] = pd.to_datetime(df['时间戳'])
         
-        # 获取当前的现实时间
-        now = datetime.datetime.now()
+        # 获取地基数据中的最后时刻
         last_data_time = df['时间戳'].iloc[-1]
         
-        # 魔法核心：如果现实时间超过了数据的最后时间，自动生成“仿真数据”填补空缺
-        if now > last_data_time:
+        # 如果数据落后于当前北京时间，自动生成实时补丁
+        if beijing_now > last_data_time:
             new_rows = []
-            minutes_to_add = int((now - last_data_time).total_seconds() / 60)
-            # 限制补齐量（最多补一天），防止系统崩溃
-            minutes_to_add = min(minutes_to_add, 1440) 
+            # 计算需要补齐的分钟数（为了性能，最多补齐最近12小时）
+            gap_minutes = min(int((beijing_now - last_data_time).total_seconds() / 60), 720)
             
-            for i in range(1, minutes_to_add + 1):
-                new_time = last_data_time + datetime.timedelta(minutes=i)
+            for i in range(1, gap_minutes + 1):
+                temp_time = last_data_time + datetime.timedelta(minutes=i)
                 for dist in ['North', 'Central', 'Cotai']:
-                    # 根据区域特征模拟不同的实时负载
-                    base = 50 if dist == 'Cotai' else 35
-                    load = base + np.random.randint(-10, 20)
-                    queue = np.random.randint(0, 4) if load > 55 else np.random.randint(0, 2)
-                    new_rows.append([new_time, dist, load, queue])
+                    # 模拟动态负荷：根据小时判断高峰
+                    hour = temp_time.hour
+                    base_val = 65 if dist == 'Cotai' else 45
+                    peak_factor = 1.7 if 18 <= hour <= 22 else 1.0
+                    load_val = base_val * peak_factor + np.random.normal(0, 5)
+                    # 模拟排队：负荷越高，排队概率越大
+                    queue_val = np.random.randint(4, 9) if load_val > 85 else np.random.randint(0, 3)
+                    new_rows.append([temp_time, dist, round(load_val, 2), queue_val])
             
             if new_rows:
                 new_df = pd.DataFrame(new_rows, columns=['时间戳', '区域', '用电负荷(kW)', '排队车辆数'])
                 df = pd.concat([df, new_df]).reset_index(drop=True)
-        return df
-    except:
-        st.error("数据加载失败，请确保目录下有 macau_charging_raw_data.csv")
-        return pd.DataFrame()
+        
+        # 裁剪数据：只显示最近 24 小时，防止网页卡顿
+        display_cutoff = beijing_now - datetime.timedelta(hours=24)
+        df = df[df['时间戳'] > display_cutoff]
+        return df, beijing_now
+    except Exception as e:
+        st.error(f"系统引擎启动失败: {e}")
+        return pd.DataFrame(), datetime.datetime.now()
 
-# 1. 页面配置（设置网页标题和图标）
-st.set_page_config(page_title="澳门智充未来-智慧大屏", layout="wide")
+# 执行数据加载
+df, current_time = get_live_data()
 
-st.title("📊 澳门智充未来：实时能源监测看板")
-st.markdown("---")
+# --- 界面展示部分 ---
+st.title("🛡️ 澳门智充未来：实时指挥与调度中心")
+st.caption(f"🚀 系统已接入 AI 自主运行模式 | 当前北京时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-# 2. 加载第一阶段生成的原始数据
-df = get_simulated_realtime_data()
-# 3. 侧边栏：筛选功能
-st.sidebar.header("数据筛选")
-selected_district = st.sidebar.multiselect("选择查看区域", options=df['区域'].unique(), default=df['区域'].unique())
+if not df.empty:
+    # 提取当前时刻（最后一条数据）
+    latest_ts = df['时间戳'].max()
+    latest_snapshot = df[df['时间戳'] == latest_ts]
 
-# 过滤数据
-filtered_df = df[df['区域'].isin(selected_district)]
+    # --- 第一行：核心指标跳动 (增加安全检查防止 NaN) ---
+    total_kw = latest_snapshot['用电负荷(kW)'].sum() if not latest_snapshot.empty else 0
+    raw_avg_queue = latest_snapshot['排队车辆数'].mean() if not latest_snapshot.empty else 0
+    
+    # 计算排队时间：如果是 NaN 则保底为 5
+    safe_avg_queue = raw_avg_queue if pd.notnull(raw_avg_queue) else 0
+    wait_time_display = int(safe_avg_queue * 4 + 5)
+    
+    # 模拟 AI 动态准确率
+    ai_acc = 94.5 + np.random.uniform(0, 1.2)
 
-# 4. 第一行：核心指标（Metric）
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("实时全澳总负荷", f"{filtered_df['用电负荷(kW)'].iloc[-1]} kW", "↑ 5.2%")
-with col2:
-    st.metric("平均排队时间", "12 分钟", "-2 分钟", delta_color="normal")
-with col3:
-    st.metric("AI 预测准确率", "94.8%", "稳定")
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        st.metric("实时全澳总负荷", f"{round(total_kw, 1)} kW", f"{round(np.random.uniform(-1, 2.5), 1)}%")
+    with m2:
+        st.metric("AI 预期排队时间", f"{wait_time_display} 分钟", "-1 min")
+    with m3:
+        st.metric("AI 实时预测准确率", f"{round(ai_acc, 2)}%", "稳定")
 
-st.markdown("---")
+    st.markdown("---")
 
-# 5. 第二行：趋势图（可视化重点）
-st.subheader("📈 各区域充电需求 24 小时变化趋势")
-fig = px.line(filtered_df.tail(72), # 只显示最近3天的趋势
-              x="时间戳", 
-              y="用电负荷(kW)", 
-              color="区域",
-              template="plotly_dark", # 科技感黑底
-              line_shape="spline")
-st.plotly_chart(fig, use_container_width=True)
+    # --- 第二行：动态可视化图表 ---
+    col_l, col_r = st.columns([2, 1])
 
-# 6. 第三行：排队情况分布（柱状图）
-st.subheader("📍 各区域充电站实时排队压力")
-fig_bar = px.bar(filtered_df.groupby('区域')['排队车辆数'].mean().reset_index(), 
-                 x='区域', 
-                 y='排队车辆数', 
-                 color='区域',
-                 title="平均排队车辆数对比")
-st.plotly_chart(fig_bar, use_container_width=True)
+    with col_l:
+        st.subheader("📈 24小时全区负荷滚动监测")
+        # 只取最近几百条画图，保证丝滑
+        fig_line = px.line(df.tail(600), x="时间戳", y="用电负荷(kW)", color="区域", 
+                          template="plotly_dark", line_shape="spline",
+                          color_discrete_map={'North':'#FF4B4B', 'Central':'#0068C9', 'Cotai':'#83CFFA'})
+        st.plotly_chart(fig_line, use_container_width=True)
 
-# 7. 底部版权信息
-st.info("数据来源：模拟澳门交通事务局 (DSAT) 与 澳电 (CEM) 开放接口数据")
-# --- 增加 AI 预测模块 (模拟模块一：LSTM 预测效果) ---
-st.markdown("---")
-st.subheader("🔮 AI 智能需求预测 (未来 1 小时)")
+    with col_r:
+        st.subheader("🚗 各站点当前排队状态")
+        fig_bar = px.bar(latest_snapshot, x="区域", y="排队车辆数", color="区域", 
+                        text_auto=True, template="plotly_dark")
+        st.plotly_chart(fig_bar, use_container_width=True)
 
-# 获取最后一个时间点的数据
-last_load = filtered_df['用电负荷(kW)'].iloc[-1]
-last_time = filtered_df['时间戳'].iloc[-1]
-
-# 模拟 AI 预测逻辑：根据当前趋势，预测未来四个 15 分钟节点的数值
-prediction_list = []
-for i in range(1, 5):
-    predict_time = last_time + datetime.timedelta(minutes=15 * i)
-    # 模拟 AI 预测：在当前值基础上加上一点波动
-    predict_load = last_load + np.random.uniform(-5, 8)
-    prediction_list.append([predict_time, "AI 预测值", round(predict_load, 2)])
-
-predict_df = pd.DataFrame(prediction_list, columns=['时间戳', '数据类型', '用电负荷(kW)'])
-
-# 把历史数据末尾和预测数据拼在一起显示
-history_tail = filtered_df.tail(10).copy()
-history_tail['数据类型'] = "历史实测"
-plot_df = pd.concat([history_tail, predict_df])
-
-# 画出预测对比图
-fig_predict = px.line(plot_df, 
-                      x="时间戳", 
-                      y="用电负荷(kW)", 
-                      color="数据类型", 
-                      line_dash="数据类型", # 预测线用虚线
-                      title="AI 时空需求预测模型输出 (基于 LSTM)")
-st.plotly_chart(fig_predict, use_container_width=True)
-
-st.success("✅ AI 引擎运行正常：当前正在根据澳门口岸流量与电网实时负荷进行滚动预测")
-# --- 增加 AI 智能调度建议 (模拟核心功能二：智能调度) ---
-st.markdown("---")
-st.subheader("🤖 AI 智慧调度指令")
-
-# 逻辑：如果预测的负荷超过 80kW，或者排队车辆超过 5 辆，就触发警报
-latest_queue = filtered_df['排队车辆数'].iloc[-1]
-latest_load = filtered_df['用电负荷(kW)'].iloc[-1]
-
-col_a, col_b = st.columns([1, 2])
-
-with col_a:
-    if latest_queue > 5 or latest_load > 80:
-        st.error("⚠️ 预警：当前区域过载")
+    # --- 第三行：AI 智能决策输出 ---
+    st.subheader("🤖 AI 实时调度决策建议")
+    
+    if total_kw > 180 or safe_avg_queue > 5:
+        st.error(f"🔴 预警指令：检测到局部站点过载。AI 已自动下发【动态调价】指令：引导后续车辆至路氹区。")
+        st.info("💡 系统状态：正在通过 V2G 协议调动周边 50 辆闲置电动车进行微网反向送电...")
     else:
-        st.success("✅ 状态：运行平稳")
+        st.success("🟢 运行报告：全澳能源网络负荷均衡。当前 AI 正在执行全天候自动巡检，无须人工干预。")
 
-with col_b:
-    if latest_queue > 5:
-        st.info(f"**AI 建议指令：** 检测到该区域排队较多，已自动向周边 2km 内的闲置充电桩发放 **'8折优惠券'**，引导后续车辆分流。")
-    elif latest_load > 80:
-        st.warning(f"**AI 建议指令：** 电网负荷接近临界点，已启动 **'V2G (车网互动)'** 模式，限制大功率快充，启动微网储能放电。")
-    else:
-        st.write("系统正在进行常态化巡检，电网余量充足，暂无需干预。")
+    # --- 显示底层数据流 (Demo 必备) ---
+    with st.expander("查看底层实时数据流"):
+        st.dataframe(df.tail(10), use_container_width=True)
 
-
-st.write("#### 📡 实时接入节点状态")
-st.dataframe(filtered_df.tail(5)) 
-
-auto_monitor = st.sidebar.checkbox('📡 开启全澳实时监控模式', value=False)
-
-if auto_monitor:
-    st.toast("正在同步澳门交通事务局 (DSAT) 数据流...")
-    time.sleep(5) # 每 5 秒刷新一次
-    st.rerun()
+# --- 自动化运行引擎：每 10 秒强制刷新 ---
+time.sleep(10)
+st.rerun()
